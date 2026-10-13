@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>ACAS Open Items</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --navy: #12284C;
+    --red: #C0272D;
+    --paper: #F6F7F9;
+    --ink: #1B2433;
+    --steel: #5B6B82;
+    --rule: #D8DEE7;
+    --white: #FFFFFF;
+    --ok: #2E6B4F;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 16px/1.5 "Barlow", "Segoe UI", Arial, sans-serif;
+  }
+  header {
+    background: var(--navy);
+    color: var(--white);
+    padding: 28px 24px 24px;
+    border-bottom: 4px solid var(--red);
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  .count {
+    font: 700 72px/1 "Barlow Semi Condensed", "Barlow", sans-serif;
+    letter-spacing: -1px;
+  }
+  .count-label { font-size: 18px; margin-top: 6px; color: #C9D3E3; }
+  main { padding: 24px; }
+  .group { margin-bottom: 28px; }
+  .group h2 {
+    font: 600 20px/1.3 "Barlow Semi Condensed", "Barlow", sans-serif;
+    color: var(--navy);
+    margin: 0 0 10px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid var(--rule);
+  }
+  .item {
+    background: var(--white);
+    border-left: 4px solid var(--navy);
+    padding: 16px 18px;
+    margin-bottom: 12px;
+  }
+  .item.old { border-left-color: var(--red); }
+  .item p { margin: 0 0 8px; max-width: 72ch; }
+  .age { font-size: 14px; color: var(--steel); margin-bottom: 12px; }
+  .item.old .age { color: var(--red); font-weight: 600; }
+  .choices { display: flex; flex-wrap: wrap; gap: 8px; }
+  .choices button {
+    font: 500 15px "Barlow", sans-serif;
+    padding: 8px 14px;
+    border: 1px solid var(--navy);
+    background: var(--white);
+    color: var(--navy);
+    cursor: pointer;
+  }
+  .choices button[aria-pressed="true"] { background: var(--navy); color: var(--white); }
+  .choices button.drop { border-color: var(--steel); color: var(--steel); }
+  .choices button.drop[aria-pressed="true"] { background: var(--steel); color: var(--white); }
+  form { margin-top: 14px; display: none; }
+  form.open { display: block; }
+  label { display: block; font-size: 14px; font-weight: 600; margin: 10px 0 4px; }
+  textarea, input, select {
+    width: 100%;
+    font: 16px "Barlow", sans-serif;
+    padding: 8px 10px;
+    border: 1px solid var(--rule);
+    background: var(--paper);
+    color: var(--ink);
+  }
+  textarea { min-height: 72px; resize: vertical; }
+  .submit {
+    margin-top: 12px;
+    font: 600 16px "Barlow", sans-serif;
+    padding: 10px 18px;
+    border: 0;
+    background: var(--red);
+    color: var(--white);
+    cursor: pointer;
+  }
+  .err { color: var(--red); font-size: 14px; margin-top: 8px; }
+  .done { border-left-color: var(--ok); color: var(--steel); }
+  .done p { margin: 0; }
+  button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-visible {
+    outline: 3px solid var(--red);
+    outline-offset: 2px;
+  }
+  .keybox { background: var(--white); padding: 20px; border-left: 4px solid var(--red); }
+  .empty { font-size: 18px; color: var(--navy); }
+  @media (max-width: 520px) {
+    .count { font-size: 56px; }
+    main { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="count" id="count">…</div>
+    <div class="count-label" id="countLabel">Loading open items</div>
+  </div>
+</header>
+<main class="wrap" id="main"></main>
+
+<script>
+const FN = "https://mtmqmtvdsgmxwosjxirq.supabase.co/functions/v1/task-queue";
+const main = document.getElementById("main");
+const countEl = document.getElementById("count");
+const countLabel = document.getElementById("countLabel");
+let remaining = 0;
+
+function getKey() {
+  const m = location.hash.match(/k=([a-f0-9]{32,})/i);
+  if (m) {
+    try { localStorage.setItem("acasQueueKey", m[1]); } catch (e) {}
+    history.replaceState(null, "", location.pathname);
+    return m[1];
+  }
+  try { return localStorage.getItem("acasQueueKey"); } catch (e) { return null; }
+}
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function daysSince(d) {
+  const ms = Date.now() - new Date(d + "T12:00:00Z").getTime();
+  return Math.max(0, Math.floor(ms / 86400000));
+}
+
+function setCount() {
+  countEl.textContent = remaining;
+  countLabel.textContent = remaining === 1 ? "item waiting on your answer" : "items waiting on your answer";
+}
+
+function askForKey(msg) {
+  countEl.textContent = "";
+  countLabel.textContent = "Access key needed";
+  main.innerHTML = `<div class="keybox">
+    <p>${esc(msg || "Open this page from the link in your email, or paste your access key.")}</p>
+    <label for="k">Access key</label>
+    <input id="k" autocomplete="off">
+    <button class="submit" id="saveKey">Open my items</button></div>`;
+  document.getElementById("saveKey").onclick = () => {
+    const v = document.getElementById("k").value.trim();
+    if (v) { try { localStorage.setItem("acasQueueKey", v); } catch (e) {} load(); }
+  };
+}
+
+const FIELDS = {
+  result: { lead: "What happened?", btn: "Close it", next: true, date: "Next step due (optional)" },
+  update: { lead: "Where does it stand?", btn: "Save update", date: "Show it again on" },
+  handoff: { lead: "Why it goes to them", btn: "Hand it off", handoff: true },
+  drop: { lead: "Reason (optional)", btn: "Drop it" }
+};
+
+function renderItem(it) {
+  const age = daysSince(it.due_date);
+  const el = document.createElement("div");
+  el.className = "item" + (age > 30 ? " old" : "");
+  const who = it.owner && it.owner !== "Rufus" ? ` · assigned to ${esc(it.owner)}` : "";
+  el.innerHTML = `
+    <p>${esc(it.action)}</p>
+    <div class="age">Waiting ${age} day${age === 1 ? "" : "s"}${who}</div>
+    <div class="choices" role="group" aria-label="Respond">
+      <button type="button" data-t="result" aria-pressed="false">Close with result</button>
+      <button type="button" data-t="update" aria-pressed="false">Update</button>
+      <button type="button" data-t="handoff" aria-pressed="false">Hand off</button>
+      <button type="button" class="drop" data-t="drop" aria-pressed="false">Drop</button>
+    </div>
+    <form></form>`;
+  const form = el.querySelector("form");
+  el.querySelectorAll(".choices button").forEach(b => {
+    b.onclick = () => {
+      el.querySelectorAll(".choices button").forEach(x => x.setAttribute("aria-pressed", "false"));
+      b.setAttribute("aria-pressed", "true");
+      buildForm(form, it, b.dataset.t, el);
+    };
+  });
+  return el;
+}
+
+function buildForm(form, it, t, el) {
+  const f = FIELDS[t];
+  let html = `<label for="tx-${it.id}">${f.lead}</label><textarea id="tx-${it.id}" name="text"></textarea>`;
+  if (f.next) html += `<label for="ns-${it.id}">Next step (optional, becomes a new item)</label><input id="ns-${it.id}" name="next_step">`;
+  if (f.date) html += `<label for="dt-${it.id}">${f.date}</label><input type="date" id="dt-${it.id}" name="next_date">`;
+  if (f.handoff) html += `<label for="ho-${it.id}">Hand it to</label><select id="ho-${it.id}" name="handoff_to">
+      <option value="BD">BD</option><option value="Kelvin">Kelvin</option>
+      <option value="Landon">Landon</option><option value="Bailey">Bailey</option></select>`;
+  html += `<button class="submit" type="submit">${f.btn}</button><div class="err" aria-live="polite"></div>`;
+  form.innerHTML = html;
+  form.classList.add("open");
+  form.querySelector("textarea").focus();
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData(form).entries());
+    data.type = t;
+    data.action_id = it.id;
+    const err = form.querySelector(".err");
+    const btn = form.querySelector(".submit");
+    btn.disabled = true;
+    err.textContent = "";
+    try {
+      const r = await fetch(FN, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-queue-key": getKey() },
+        body: JSON.stringify(data)
+      });
+      const body = await r.json();
+      if (!r.ok) { err.textContent = body.error || "That didn't save. Try again."; btn.disabled = false; return; }
+      const note = { result: "Closed.", update: "Updated. It will come back on the date you set.", handoff: `Handed to ${data.handoff_to}.`, drop: "Dropped." }[t];
+      el.className = "item done";
+      el.innerHTML = `<p>${note} ${body.spawned ? "Your next step is now its own item." : ""}</p>`;
+      remaining -= 1;
+      setCount();
+    } catch (x) {
+      err.textContent = "Couldn't reach the server. Check your connection and try again.";
+      btn.disabled = false;
+    }
+  };
+}
+
+async function load() {
+  const key = getKey();
+  if (!key) return askForKey();
+  try {
+    const r = await fetch(FN, { headers: { "x-queue-key": key } });
+    if (r.status === 401) {
+      try { localStorage.removeItem("acasQueueKey"); } catch (e) {}
+      return askForKey("That access key wasn't accepted. Use the link from your email or paste a current key.");
+    }
+    const body = await r.json();
+    const items = body.items || [];
+    remaining = items.length;
+    setCount();
+    main.innerHTML = "";
+    if (!items.length) {
+      main.innerHTML = `<p class="empty">Nothing is waiting on you.</p>`;
+      return;
+    }
+    const groups = new Map();
+    items.forEach(it => {
+      if (!groups.has(it.parent)) groups.set(it.parent, []);
+      groups.get(it.parent).push(it);
+    });
+    for (const [name, list] of groups) {
+      const g = document.createElement("section");
+      g.className = "group";
+      g.innerHTML = `<h2>${esc(name)}</h2>`;
+      list.forEach(it => g.appendChild(renderItem(it)));
+      main.appendChild(g);
+    }
+  } catch (x) {
+    countEl.textContent = "";
+    countLabel.textContent = "Couldn't load";
+    main.innerHTML = `<p class="err">Couldn't reach the server. Check your connection and reload.</p>`;
+  }
+}
+
+load();
+</script>
+</body>
+</html>
